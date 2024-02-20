@@ -22,24 +22,30 @@ import { IDL, SolmatePresale } from "../constants/presale_idl";
 import { NATIVE_MINT } from "@solana/spl-token";
 
 export const getPresaleInfo = async function (req: Request, res: Response, next: NextFunction) {
+    try {
+        const transactionRepo = getRepository(Transactions);
+        const transactions = await transactionRepo.find({
+            where: {
+                status: StatusType.Successed
+            }
+        });
 
-    const transactionRepo = getRepository(Transactions);
-    const transactions = await transactionRepo.find({
-        status: StatusType.Successed
-    });
+        let currentSupply = 0;
+        for (const transaction of transactions) {
+            currentSupply += transaction.amount;
+        }
 
-    let currentSupply = 0;
-    for (const transaction of transactions) {
-        currentSupply += transaction.amount;
-    }
-
-    return res.status(200)
-        .json({
+        return res.status(200).json({
             price: PRESALE_PRICE,
             totalSupply: TOTAL_SUPPLY,
             currentSupply
-        })
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
 }
+//changes are above.
 
 export const getMyTokenSaleInfo = async function (req: Request, res: Response, next: NextFunction) {
     const myWalletAddress = req.params.walletaddress;
@@ -49,67 +55,63 @@ export const getMyTokenSaleInfo = async function (req: Request, res: Response, n
         status: StatusType.Successed
     });
 
-    let amountSolMate, amountETH, amountBNB, amountSOL, amountStables = 0;
+    let amountSolMate = 0, amountETH = 0, amountBNB = 0, amountSOL = 0, amountStables = 0;
     await myTransactions.map(el => {
-        if(el.chain_id == ETH_CHAIN_ID && el.token_address == ZERO_ADDRESS){
-            amountSolMate = amountSolMate + el.amount;
-            amountETH = amountETH + el.token_amount;
+        if (el.chain_id == ETH_CHAIN_ID && el.token_address == ZERO_ADDRESS) {
+            amountSolMate += el.amount;
+            amountETH += el.token_amount;
         }
-        if(el.chain_id == BSC_CHAIN_ID && el.token_address == ZERO_ADDRESS){
-            amountSolMate = amountSolMate + el.amount;
-            amountBNB  = amountBNB + el.token_amount;
+        if (el.chain_id == BSC_CHAIN_ID && el.token_address == ZERO_ADDRESS) {
+            amountSolMate += el.amount;
+            amountBNB += el.token_amount;
         }
-        if(el.chain_id == SOL_CHAIN && el.token_address == ZERO_ADDRESS){
-            amountSolMate = amountSolMate + el.amount;
-            amountSOL = amountSOL + el.token_amount;
+        if (el.chain_id == SOL_CHAIN && el.token_address == ZERO_ADDRESS) {
+            amountSolMate += el.amount;
+            amountSOL += el.token_amount;
         }
-        if(el.token_address != ZERO_ADDRESS){
-            amountSolMate = amountSolMate + el.amount;
-            amountStables = amountStables + el.token_amount;
+        if (el.token_address != ZERO_ADDRESS) {
+            amountSolMate += el.amount;
+            amountStables += el.token_amount;
         }
     })
 
     return res.status(200)
-            .json({
-                amountSolMate,
-                amountETH,
-                amountBNB,
-                amountSOL,
-                amountStables,
-                myTransactions
-            })
+        .json({
+            amountSolMate,
+            amountETH,
+            amountBNB,
+            amountSOL,
+            amountStables,
+            myTransactions
+        })
 
 }
 
 export const getPurchaseInfo = async function (req: Request, res: Response, next: NextFunction) {
+    try {
+        const transactionRepo = getRepository(Transactions);
+        const transactions = await transactionRepo.find({
+            status: StatusType.Successed
+        });
 
-    const transactionRepo = getRepository(Transactions);
-    const transactions = await transactionRepo.find({
-        status: StatusType.Successed
-    });
-
-    return res.status(200)
-        .json(transactions)
+        return res.status(200).json(transactions);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
 }
 
 export const generateSignature = async function (req: Request, res: Response, next: NextFunction) {
-
     const chain = req.body.chain;
     const from = req.body.from;
     const tokenAddress = req.body.token_address;
     const _amount = Number.parseFloat(req.body.amount);
 
-    if (chain != ETH_CHAIN
-        && chain != BSC_CHAIN
-        && chain != SOL_CHAIN) {
-        return res.status(500)
-            .json({
-                error: 'Invalid chain'
-            })
+    if (chain != ETH_CHAIN && chain != BSC_CHAIN && chain != SOL_CHAIN) {
+        return res.status(500).json({ error: 'Invalid chain' });
     }
 
-    const chainId = chain === ETH_CHAIN ? ETH_CHAIN_ID :
-        (chain === BSC_CHAIN ? BSC_CHAIN_ID : null);
+    const chainId = chain === ETH_CHAIN ? ETH_CHAIN_ID : (chain === BSC_CHAIN ? BSC_CHAIN_ID : null);
     let presaleAddress = getContractAddress(chainId);
 
     const domainData = {
@@ -131,15 +133,11 @@ export const generateSignature = async function (req: Request, res: Response, ne
         if (tokenAddress == ZERO_ADDRESS) {
             const usdPrice = await getUsdPrice(chain);
             if (!usdPrice) {
-                return res.status(500)
-                    .json({
-                        error: "Get error while generate signature. Please try again later."
-                    })
+                return res.status(500).json({ error: "Get error while generate signature. Please try again later." });
             }
 
             tokenAmount = ethers.utils.parseEther((_amount / PRESALE_PRICE / usdPrice).toFixed(18));
-        }
-        else {
+        } else {
             const tokenContract = new Contract(tokenAddress, ERC20_ABI, provider);
             const tokenDecimals = await tokenContract.decimals();
 
@@ -162,26 +160,19 @@ export const generateSignature = async function (req: Request, res: Response, ne
             message
         );
 
-        return res.status(200)
-            .json({
-                amount,
-                tokenAmount,
-                signature,
-                deadline
-            })
-    }
-    catch (ex) {
+        return res.status(200).json({
+            amount,
+            tokenAmount,
+            signature,
+            deadline
+        })
+    } catch (ex) {
         logger.error(`Generate signature - ${ex}`)
-        return res.status(500)
-            .json({
-                error: ex.toString()
-            })
+        return res.status(500).json({ error: ex.toString() });
     }
-
 }
 
 export const requestSOL = async function (req: Request, res: Response, next: NextFunction) {
-
     try {
         const connection = new Connection(SOL_RPC_URL);
         const provider = new anchor.AnchorProvider(
@@ -201,21 +192,16 @@ export const requestSOL = async function (req: Request, res: Response, next: Nex
         if (mint.equals(NATIVE_MINT)) {
             const usdPrice = await getUsdPrice(SOL_CHAIN);
             if (!usdPrice) {
-                return res.status(500)
-                    .json({
-                        error: "Get error while generate trasnaction. Please try again later."
-                    })
+                return res.status(500).json({ error: "Get error while generate trasnaction. Please try again later." });
             }
 
             tokenAmount = ethers.utils.parseUnits((_amount / PRESALE_PRICE / usdPrice).toFixed(9), 9);
-        }
-        else {
+        } else {
             tokenAmount = ethers.utils.parseUnits((_amount / PRESALE_PRICE).toFixed(6), 6);
         }
 
         const buyIx = await buy(program, SOL_AUTHORITY_KEY.publicKey, buyer, mint, SOL_VAULT_ADDRESS, new BN(amount.toString()), new BN(tokenAmount.toString()));
 
-        // Generate new transaction with buyer as payer
         const { blockhash } = await provider.connection.getLatestBlockhash("finalized");
         const buyTx = new anchor.web3.Transaction({
             recentBlockhash: blockhash,
@@ -223,45 +209,31 @@ export const requestSOL = async function (req: Request, res: Response, next: Nex
         });
         buyTx.add(buyIx);
 
-        // Sign with authority pubkey in BE
         buyTx.partialSign(SOL_AUTHORITY_KEY);
 
-        // Serialize transaction in BE
         const serializeTx = buyTx.serialize({
             requireAllSignatures: false
         });
-        // Send encoded bytes to FE
+
         const encodedTx = base64.encode(serializeTx);
 
-        return res.status(200)
-            .json({
-                tx: encodedTx
-            })
-    }
-    catch (ex) {
+        return res.status(200).json({
+            tx: encodedTx
+        })
+    } catch (ex) {
         logger.error(`Request SOL transaction - ${ex}`);
-        return res.status(500)
-            .json({
-                error: ex.toString()
-            })
+        return res.status(500).json({ error: ex.toString() });
     }
-
 }
 
 export const processEVM = async function (req: Request, res: Response, next: NextFunction) {
-
     const chain = req.body.chain;
     const tx_hash = req.body.tx_hash as string;
 
-    if (chain != ETH_CHAIN
-        && chain != BSC_CHAIN) {
-        return res.status(500)
-            .json({
-                error: 'Invalid chain'
-            })
+    if (chain != ETH_CHAIN && chain != BSC_CHAIN) {
+        return res.status(500).json({ error: 'Invalid chain' });
     }
-    const chainId = chain === ETH_CHAIN ? ETH_CHAIN_ID :
-        (chain === BSC_CHAIN ? BSC_CHAIN_ID : null);
+    const chainId = chain === ETH_CHAIN ? ETH_CHAIN_ID : (chain === BSC_CHAIN ? BSC_CHAIN_ID : null);
 
     const transRepo = getRepository(Transactions);
 
@@ -270,10 +242,7 @@ export const processEVM = async function (req: Request, res: Response, next: Nex
             tx_hash
         });
         if (existRecord) {
-            return res.status(400)
-                .json({
-                    error: 'Already requested transaction.'
-                })
+            return res.status(400).json({ error: 'Already requested transaction.' });
         }
 
         const record = await getEvmTransaction(chainId, tx_hash);
@@ -288,32 +257,19 @@ export const processEVM = async function (req: Request, res: Response, next: Nex
                 status: StatusType.Successed
             }));
 
-            logger.info(`Processing EVM - ${tx_hash} - ${record.amount} Solmate purchased}`);
-            return res.status(200)
-                .json({
-                    msg: 'Request has been approved'
-                })
-        }
-        else {
+            logger.info(`Processing EVM - ${tx_hash} - ${record.amount} Solmate purchased`);
+            return res.status(200).json({ msg: 'Request has been approved' });
+        } else {
             logger.error(`Processing EVM - ${tx_hash}`);
-            return res.status(500)
-                .json({
-                    error: 'Unknown request'
-                })
+            return res.status(500).json({ error: 'Unknown request' });
         }
-    }
-    catch (ex) {
+    } catch (ex) {
         logger.error(`Processing EVM - ${tx_hash} - ${ex}`);
-        return res.status(500)
-            .json({
-                error: ex.toString()
-            })
+        return res.status(500).json({ error: ex.toString() });
     }
-
 }
 
 export const processSOL = async function (req: Request, res: Response, next: NextFunction) {
-
     const tx_hash = req.body.tx_hash as string;
 
     const transRepo = getRepository(Transactions);
@@ -323,10 +279,7 @@ export const processSOL = async function (req: Request, res: Response, next: Nex
             tx_hash
         });
         if (existRecord) {
-            return res.status(400)
-                .json({
-                    error: 'Already requested transaction.'
-                })
+            return res.status(400).json({ error: 'Already requested transaction.' });
         }
 
         const record = await getSolTransaction(tx_hash);
@@ -341,26 +294,14 @@ export const processSOL = async function (req: Request, res: Response, next: Nex
                 status: StatusType.Successed
             }));
 
-            logger.info(`Processing SOL - ${tx_hash} - ${record.amount} Solmate purchased}`);
-            return res.status(200)
-                .json({
-                    msg: 'Request has been approved'
-                })
+            logger.info(`Processing SOL - ${tx_hash} - ${record.amount} Solmate purchased`);
+            return res.status(200).json({ msg: 'Request has been approved' });
+        } else {
+            logger.error(`Processing SOL - ${tx_hash}`);
+            return res.status(500).json({ error: 'Unknown request' });
         }
-        else {
-            logger.error(`Processing SOL - ${tx_hash}}`);
-            return res.status(500)
-                .json({
-                    error: 'Unknown request'
-                })
-        }
+    } catch (ex) {
+        logger.error(`Processing SOL - ${tx_hash} - ${ex}`);
+        return res.status(500).json({ error: ex.toString() });
     }
-    catch (ex) {
-        logger.error(`Processing SOL - ${tx_hash}} - ${ex}`);
-        return res.status(500)
-            .json({
-                error: ex.toString()
-            })
-    }
-
 }
